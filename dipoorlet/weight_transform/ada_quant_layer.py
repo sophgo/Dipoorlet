@@ -143,6 +143,8 @@ class AdaQLayer(torch.nn.Module):
             self.layer = self.build_torch_conv(node, weight, bias)
         elif self.type == 'Gemm':
             self.layer = self.build_torch_linear(node, weight, bias)
+        elif self.type == 'MatMul':
+            self.layer = self.build_torch_linear_matmul(node, weight, bias)
         else:
             self.layer = self.build_torch_deconv(node, weight, bias)
             self.transposed = True
@@ -179,6 +181,18 @@ class AdaQLayer(torch.nn.Module):
         return conv
 
     def build_torch_linear(self, node, weight, bias):
+        o_c = weight.shape[0]
+        i_c = weight.shape[1]
+        bias_flag = bias is not None
+        linear = torch.nn.Linear(i_c, o_c, bias_flag)
+        linear.weight.data = weight.data
+        linear.weight.requires_grad = False
+        if bias is not None:
+            linear.bias.data = torch.from_numpy(bias).cuda().data
+            linear.bias.requires_grad = False
+        return linear
+
+    def build_torch_linear_matmul(self, node, weight, bias):
         o_c = weight.shape[0]
         i_c = weight.shape[1]
         bias_flag = bias is not None
@@ -230,6 +244,10 @@ class AdaQLayer(torch.nn.Module):
                 self.layer.dilation,
                 self.layer.groups)
         elif self.type == 'Gemm':
+            x = F.linear(
+                x,
+                q_weight, self.layer.bias)
+        elif self.type == "MatMul":
             x = F.linear(
                 x,
                 q_weight, self.layer.bias)

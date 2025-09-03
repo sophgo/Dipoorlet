@@ -34,6 +34,8 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
         if node.name in args.skip_layers:
             continue
         if node.op_type in LEARNABLE_LAYER_TYPES and node.name not in already:
+            if node.op_type == "MatMul" and node.input[1] not in graph_ori.initializer:
+                continue
             block_layer_list = get_block_from_first(graph, node, args)
             # If the last node has weight equalized, it cannot be the last.
             if args.we:
@@ -45,6 +47,9 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
             # Using graph_brecq and restore act cache for incremental update.
             if not prev_act_cache:
                 graph_q, quant_node_list = quant_graph(graph_brecq, clip_val, args)
+                rank = dist.get_rank()
+                if rank == 0:
+                    graph_q.save_onnx_model(name='quant_model')
                 q_act_cache = ActivationCache(graph_q, args, rank_st, rank_ed)
             else:
                 q_act_cache.update_graph(graph_q)
@@ -73,7 +78,7 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                 if args.deploy != 'nnie':
                     weight_range = clip_val[_node.input[1]]
                     qw_param = platform_setting_table[args.deploy]['qw_params']
-                    if _node.op_type == 'ConvTranspose':
+                    if _node.op_type == 'ConvTranspose' or _node.op_type == 'MatMul':
                         weight = weight.transpose(0, 1)
                     scale, q_min, q_max = get_quant_tensor(weight.shape, qw_param, weight_range)
                     rest = (weight / scale) - (weight / scale).floor()
@@ -133,14 +138,14 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                 if args.deploy != 'nnie':
                     weight_range = clip_val[_node.input[1]]
                     qw_param = platform_setting_table[args.deploy]['qw_params']
-                    if _node.op_type == 'ConvTranspose':
+                    if _node.op_type == 'ConvTranspose' or _node.op_type == 'MatMul':
                         weight = weight.transpose(0, 1)
                     scale, q_min, q_max = get_quant_tensor(weight.shape, qw_param, weight_range)
                     new_rounded_weight = quant_weight(
                         weight,
                         round_mask, scale, q_min, q_max,
                         qw_param['per_channel'], soft=False)
-                    if _node.op_type == 'ConvTranspose':
+                    if _node.op_type == 'ConvTranspose' or _node.op_type == 'MatMul':
                         new_rounded_weight = new_rounded_weight.transpose(0, 1)
                 else:
                     new_rounded_weight = quant_weight_nnie(weight, round_mask, soft=False)

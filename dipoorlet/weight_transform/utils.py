@@ -4,7 +4,7 @@ from onnx import numpy_helper
 
 from ..quantize import get_qnode_by_param
 
-LEARNABLE_LAYER_TYPES = ['Conv', 'Gemm', 'ConvTranspose']
+LEARNABLE_LAYER_TYPES = ['Conv', 'Gemm', 'ConvTranspose', 'MatMul']
 __all__ = ['LEARNABLE_LAYER_TYPES', 'follow_relu', 'following_relu', 'update_weight', 'get_quant_tensor', 'get_block_from_first']
 
 

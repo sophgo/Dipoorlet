@@ -72,8 +72,13 @@ def find_clip_val_octav(onnx_graph, args, **kwargs):
 def find_clip_val_minmax_weight(onnx_graph, args):
     weight_tensor = {}
     need_transpose = []
+    matmul_weight = []
     for node in onnx_graph.graph.node:
         if node.op_type in LAYER_HAS_WEIGHT:
+            if node.op_type == "MatMul" and node.input[1] not in onnx_graph.initializer:
+                continue
+            if node.op_type == "MatMul":
+                matmul_weight.append(node.input[1])
             for in_tensor in node.input[1:]:
                 weight_tensor[in_tensor] = onnx_graph.get_initializer(in_tensor)
             if node.op_type == 'ConvTranspose':
@@ -85,6 +90,8 @@ def find_clip_val_minmax_weight(onnx_graph, args):
             continue
         if name in need_transpose:
             tensor = tensor.transpose([1, 0, 2, 3])
+        if name in matmul_weight:
+            tensor = tensor.transpose([1, 0])
         c_num = tensor.shape[0]
         weight_clip_val[name] = [np.min(tensor.reshape((c_num, -1)), -1),
                                  np.max(tensor.reshape((c_num, -1)), -1)]

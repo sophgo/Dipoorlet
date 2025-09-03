@@ -107,14 +107,19 @@ class ONNXGraph(object):
         value_names = list(self.tensor_name_shape_map.keys())
         for name in value_names:
             self.tensor_name_shape_map[name + "_q"] = self.tensor_name_shape_map[name]
+            self.tensor_name_shape_map[name + "_dq_q"] = self.tensor_name_shape_map[name]
             if self.deploy is not None:
                 if name in self.initializer:
                     symmetric = platform_setting_table[self.deploy]['qw_params']['symmetric']
                 else:
                     symmetric = platform_setting_table[self.deploy]['qi_params']['symmetric']
                 self.value_name_type_map[name + "_q"] = TensorProto.INT8 if symmetric else TensorProto.UINT8
+                self.value_name_type_map[name + "_dq_q"] = TensorProto.INT8 if symmetric else TensorProto.UINT8
                 self.tensor_name_shape_map[name + "_dq"] = self.tensor_name_shape_map[name]
+                self.tensor_name_shape_map[name + "_dq_dq"] = self.tensor_name_shape_map[name]
                 self.value_name_type_map[name + "_dq"] = TensorProto.FLOAT
+                self.value_name_type_map[name + "_dq_dq"] = TensorProto.FLOAT
+
 
     def get_tensor_shape(self, tensor_name):
         return self.tensor_name_shape_map[tensor_name]

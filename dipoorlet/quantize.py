@@ -21,9 +21,15 @@ def quant_graph(onnx_graph, clip_val, args):
     graph_q = ONNXGraph()
     graph_q.copy_from(onnx_graph)
     quant_node_list = []
+    quant_node_list_w4a4 = []
 
     for node in graph_q.graph.node:
         if node.name in args.skip_layers:
+            continue
+        if node.name in platform_setting_table[args.deploy]['w4a4']:
+            quant_node_list_w4a4.append(node)
+            continue
+        if args.optim_transformer and node.op_type == "Add": # add op set as float
             continue
         if node.op_type in platform_setting_table[args.deploy]['quant_nodes']:
             quant_node_list.append(node)
@@ -33,6 +39,8 @@ def quant_graph(onnx_graph, clip_val, args):
         insert_fake_quant_node(graph_q, node, act_quantized, clip_val, args)
     if platform_setting_table[args.deploy]['quantize_network_output']:
         insert_fake_quant_node_output(graph_q, clip_val, args)
+    for node in quant_node_list_w4a4:
+        insert_fake_quant_node_w4a4(graph_q, node, act_quantized, clip_val, args)
     graph_q.update_model()
     return graph_q, quant_node_list
 
@@ -60,10 +68,16 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
             if not find_weight:
                 # We find Weight here.
                 find_weight = True
-                if node.op_type == 'ConvTranspose':
+                if node.op_type == 'ConvTranspose' or node.op_type == 'MatMul':
                     need_transpose = True
-                q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
+                if node.op_type == 'Gemm' or node.op_type == 'MatMul': 
+                    param['qw_params']['bit_width'] = 4
+                    q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
                                                    need_transpose)
+                    param['qw_params']['bit_width'] = 4
+                else:
+                    q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
+                                                    need_transpose)
 
             elif 'qb_params' in param:
                 # We find bias here.
@@ -77,10 +91,14 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
             #  skip    Q       Q
             #   \      |      /
             #         Add           means the first add branch with conv should merge in TRT.
-            if args.deploy == 'trt' and node.op_type == 'Add' and not trt_merge_add:
+            if (args.deploy == 'trt' or args.deploy == 'stpu') and node.op_type == 'Add' and not trt_merge_add:
                 _prev = graph.get_tensor_producer(in_tensor)
-                if _prev.op_type == 'Conv':
+                if _prev.op_type == 'Conv' or _prev.op_type == 'MatMul':
                     trt_merge_add = True
+                    continue
+            if (args.deploy == 'stpu') and node.op_type == 'Mul':
+                _prev = graph.get_tensor_producer(in_tensor)
+                if _prev.op_type == 'Sigmoid':
                     continue
             q_nodes, _, _ = get_qnode_by_param(param['qi_params'], in_tensor, shape, data_range_list[in_tensor])
 
@@ -94,6 +112,108 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
 
     graph.topologize_graph()
 
+def insert_fake_quant_node_w4a4(graph, node, act_quantized, data_range_list, args):
+    param = platform_setting_table[args.deploy]
+    # We now quant input and weight tp INT8 but left output fp32.
+    find_weight = False
+    trt_merge_add = False
+    for idx, in_tensor in enumerate(node.input):
+        # ConvTranspose need transpose for weight.
+        need_transpose = False
+        shape = graph.get_tensor_shape(in_tensor)
+
+        q_nodes = None
+        # Quantize weight.
+        if in_tensor in graph.initializer and node.op_type in LAYER_HAS_WEIGHT:
+            if not find_weight:
+                # We find Weight here.
+                find_weight = True
+                if node.op_type == 'ConvTranspose' or node.op_type == 'MatMul':
+                    need_transpose = True
+                param['qw_params']['bit_width'] = 4
+                q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
+                                                need_transpose)
+
+            elif 'qb_params' in param:
+                # We find bias here.
+                q_nodes, _, _ = get_qnode_by_param(param['qb_params'], in_tensor, shape, data_range_list[in_tensor],
+                                                   need_transpose)
+            if q_nodes is not None:
+                node.input[idx] = q_nodes.output[0].name
+                # Output already quantized.
+                if in_tensor in act_quantized:
+                    continue
+                graph.insert_qnodes_purely(q_nodes=q_nodes, node=node)
+                act_quantized.append(in_tensor)
+        # Quantize input.
+        if in_tensor in graph.network_inputs or in_tensor not in graph.input:
+            # Conv   Conv    Conv
+            #  |       |       |
+            #  skip    Q       Q
+            #   \      |      /
+            #         Add           means the first add branch with conv should merge in TRT.
+            if (args.deploy == 'stpu') and node.op_type in LAYER_HAS_WEIGHT:
+                # in_tensor 已经被插入int8伪量化节点，现在仅仅需要在int8伪量化节点之后插入int4伪量化节点就可以
+                if in_tensor in act_quantized:
+                    param['qi_params']['bit_width'] = 4
+                    in_tensor_1 = in_tensor + DQTENSORSUFFIX
+                    q_nodes, _, _ = get_qnode_by_param(param['qi_params'], in_tensor_1, shape, data_range_list[in_tensor])
+                    if q_nodes is not None:
+                        node.input[idx] = q_nodes.output[0].name
+                        graph.insert_qnodes_purely(q_nodes=q_nodes, node=node)
+                #in_tensor还没有被插入伪量化节点，需要判断前继节点是int4 or int8，如果是int4，只需要插入int4伪量化节点，如果是int8，则需要插入int8+int4伪量化节点
+                else:
+                    _prev = graph.get_tensor_producer(in_tensor)
+                    if _prev.name in platform_setting_table[args.deploy]['w4a4']:
+                        param['qi_params']['bit_width'] = 4
+                        q_nodes, _, _ = get_qnode_by_param(param['qi_params'], in_tensor, shape, data_range_list[in_tensor])
+                        if q_nodes is not None:
+                            node.input[idx] = q_nodes.output[0].name
+                            graph.insert_qnodes_purely(q_nodes=q_nodes, node=node)
+                            act_quantized.append(in_tensor)
+                    else:
+                        param['qi_params']['bit_width'] = 8
+                        q_nodes, _, _ = get_qnode_by_param(param['qi_params'], in_tensor, shape, data_range_list[in_tensor])
+                        if q_nodes is not None:
+                            node.input[idx] = q_nodes.output[0].name
+                            graph.insert_qnodes_purely(q_nodes=q_nodes, node=node)
+                            graph.topologize_graph()
+                        param['qi_params']['bit_width'] = 4
+                        in_tensor_1 = in_tensor + DQTENSORSUFFIX
+                        q_nodes, _, _ = get_qnode_by_param(param['qi_params'], in_tensor_1, shape, data_range_list[in_tensor])
+                        if q_nodes is not None:
+                            node.input[idx] = q_nodes.output[0].name
+                            graph.insert_qnodes_purely(q_nodes=q_nodes, node=node)
+                        act_quantized.append(in_tensor)
+                # _prev = graph.get_tensor_producer(in_tensor)
+                # if _prev.name in platform_setting_table[args.deploy]['w4a4']:
+                #     param['qi_params']['bit_width'] = 4
+                #     q_nodes, _, _ = get_qnode_by_param(param['qi_params'], in_tensor, shape, data_range_list[in_tensor])
+                #     if q_nodes is not None:
+                #         node.input[idx] = q_nodes.output[0].name
+                #         # Output already quantized.
+                #         if in_tensor in act_quantized:
+                #             continue
+                #         graph.insert_qnodes_purely(q_nodes=q_nodes, node=node)
+                #         act_quantized.append(in_tensor)
+                # else:
+                #     param['qi_params']['bit_width'] = 8
+                #     q_nodes, _, _ = get_qnode_by_param(param['qi_params'], in_tensor, shape, data_range_list[in_tensor])
+                #     if q_nodes is not None:
+                #         node.input[idx] = q_nodes.output[0].name
+                #         # Output already quantized.
+                #         if in_tensor in act_quantized:
+                #             continue
+                #         graph.insert_qnodes_purely(q_nodes=q_nodes, node=node)
+                #         graph.topologize_graph()
+                #     param['qi_params']['bit_width'] = 4
+                #     in_tensor_1 = in_tensor + DQTENSORSUFFIX
+                #     q_nodes, _, _ = get_qnode_by_param(param['qi_params'], in_tensor_1, shape, data_range_list[in_tensor])
+                #     if q_nodes is not None:
+                #         node.input[idx] = q_nodes.output[0].name
+                #         graph.insert_qnodes_purely(q_nodes=q_nodes, node=node)   
+                #     act_quantized.append(in_tensor)
+    graph.topologize_graph()
 
 def insert_fake_quant_node_output(graph, clip_val, args):
     param = platform_setting_table[args.deploy]

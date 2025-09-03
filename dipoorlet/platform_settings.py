@@ -1,11 +1,12 @@
-LAYER_HAS_WEIGHT = ['Conv', 'Gemm', 'ConvTranspose', 'PRelu', 'BatchNormalization']
+LAYER_HAS_WEIGHT = ['Conv', 'Gemm', 'ConvTranspose', 'PRelu', 'BatchNormalization', 'MatMul']
 basic_quant_node = ['Relu', 'Eltwise', 'MaxPool', 'Conv', 'Gemm', 'ConvTranspose', 'PRelu',
-                    'AveragePool', 'Concat', 'Split', 'Add', 'Mul', 'Abs', 'Reciprocal', 'Sigmoid']
+                    'AveragePool', 'Concat', 'Split', 'Add', 'Mul', 'Abs', 'Reciprocal', 'Sigmoid',
+                    'GlobalAveragePool', 'MatMul', 'Gelu', 'Transpose']
 
 
 trt_platform_settings = {
     'deploy_exclude_layers': [],
-    'quant_nodes': ['Relu', 'MaxPool', 'Conv', 'Gemm', 'ConvTranspose', 'PRelu', 'AveragePool', 'Add', 'Sigmoid'],
+    'quant_nodes': ['Relu', 'MaxPool', 'Conv', 'Gemm', 'ConvTranspose', 'PRelu', 'AveragePool', 'Add', 'Sigmoid', 'GlobalAveragePool', 'Flatten'],
     'qw_params': {
         'bit_width': 8,
         'type': 'Linear',
@@ -34,10 +35,11 @@ stpu_platform_settings = {
         'bit_width': 8,
         'type': 'Linear',
         'symmetric': True,
-        'per_channel': False
+        'per_channel': True
     },
-    'quantize_network_output': False,
-    'deploy_weight': True
+    'quantize_network_output': True,
+    'deploy_weight': True,
+    'w4a4':["resnetv16_stage3_conv9_fwd","resnetv16_stage2_conv8_fwd_Conv","resnetv16_stage3_conv6_fwd_Conv","resnetv16_stage2_conv6_fwd_Conv","resnetv16_stage3_conv10_fwd_Conv","resnetv16_stage3_conv2_fwd_Conv","resnetv16_stage3_conv11_fwd","resnetv16_stage3_conv7_fwd"]
 }
 
 
