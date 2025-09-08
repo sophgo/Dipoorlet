@@ -7,7 +7,6 @@ import copy
 import onnx
 import torch
 import torch.distributed as dist
-from onnx import helper, numpy_helper
 
 from onnxsim import simplify
 
@@ -21,37 +20,6 @@ from .utils import (ONNXGraph, load_clip_val, logger, reduce_clip_val,
                     setup_logger, deploy_QOperator)
 from .weight_transform import weight_calibration
 
-# ----------------------------------------------------------
-# 自动在 opt_level == 1 时屏蔽 TransposeOptimizer 的补丁
-# ----------------------------------------------------------
-import onnxruntime.transformers.optimizer as _ort_mod
-
-# 备份原函数
-_orig_optimize_by_ort = _ort_mod.optimize_by_onnxruntime
-
-def _patched_optimize_by_onnxruntime(
-        input,            # str | Path | onnx.ModelProto
-        use_gpu=False,
-        opt_level=1,
-        disabled_optimizers=None,
-        verbose=False):
-    # 确保列表可写
-    if disabled_optimizers is None:
-        disabled_optimizers = []
-    # 仅当 opt_level == 1 时插入 TransposeOptimizer
-    if opt_level == 1 and "TransposeOptimizer" not in disabled_optimizers:
-        disabled_optimizers += (
-            [
-                "TransposeOptimizer",
-            ]
-        )
-    # 调用原始实现
-    return _orig_optimize_by_ort(
-        input, use_gpu, opt_level = opt_level, disabled_optimizers = disabled_optimizers, verbose = verbose)
-
-# 注入补丁
-_ort_mod.optimize_by_onnxruntime = _patched_optimize_by_onnxruntime
-# ----------------------------------------------------------
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-M", "--model", help="onnx model")
@@ -115,29 +83,12 @@ if dist.get_rank() == 0:
         args.infer_shape_dir = os.path.join(os.path.abspath(model_path), "infer_shape.onnx")
         onnx.shape_inference.infer_shapes_path(args.model, args.infer_shape_dir)
         args.optimzed_model_dir = os.path.join(args.output_dir, 'optim_model.onnx')
-        # os.system("python -m onnxruntime.transformers.optimizer \
-        #            --input {} --output {} --model_type={} \
-        #            --use_external_data_format --disable_packed_qkv \
-        #            --disable_packed_kv --use_gpu --disable_nhwc_conv \
-        #            --disable_bias_gelu --disable_skip_layer_norm"
-        #            .format(args.infer_shape_dir, args.optimzed_model_dir, args.model_type))
-        from onnxruntime.transformers.optimizer import main as ort_opt_main
-        cmd = [
-            "optimizer",                       # argv[0] 占位
-            "--input",  args.infer_shape_dir,
-            "--output", args.optimzed_model_dir,
-            "--model_type", args.model_type,
-            "--use_external_data_format",
-            "--disable_packed_qkv",
-            "--disable_packed_kv",
-            "--use_gpu",
-            "--disable_nhwc_conv",
-            "--disable_bias_gelu",
-            "--disable_skip_layer_norm",
-        ]
-        # 将参数写回 sys.argv 然后直接调用 CLI 主函数
-        sys.argv = cmd
-        ort_opt_main()    
+        os.system("python -m onnxruntime.transformers.optimizer \
+                   --input {} --output {} --model_type={} \
+                   --use_external_data_format --disable_packed_qkv \
+                   --disable_packed_kv --use_gpu --disable_nhwc_conv \
+                   --disable_bias_gelu --disable_skip_layer_norm"
+                   .format(args.infer_shape_dir, args.optimzed_model_dir, args.model_type))
 
 dist.barrier()
 args.optimzed_model_dir = os.path.join(args.output_dir, 'optim_model.onnx')
@@ -164,6 +115,7 @@ else:
         model = onnx.version_converter.convert_version(model, 13)
     model, check = simplify(model)
     assert check, "Simplified ONNX model could not be validated"
+model = onnx.shape_inference.infer_shapes(model)
 onnx_graph = ONNXGraph(model, args.output_dir, args.deploy, args.model_type)
 
 if dist.get_rank() == 0 and not args.optim_transformer:

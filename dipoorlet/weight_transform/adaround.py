@@ -34,6 +34,9 @@ def adaround(graph_ori, graph, act_clip_val, weight_clip_val, args):
             # We can not mimic when node has weight equalized.
             if args.we and node_has_equalized(graph, node):
                 continue
+            # act * act matmul, skip
+            if node.op_type == 'MatMul' and node.input[1] not in graph_ada.initializer:
+                continue
             if dist.get_rank() == 0:
                 logger.info("Adaround for: {}".format(node.name))
             # Using graph_ada and restore act cache for incremental update.
@@ -64,7 +67,7 @@ def adaround(graph_ori, graph, act_clip_val, weight_clip_val, args):
             if args.deploy != 'nnie':
                 weight_range = clip_val[node.input[1]]
                 qw_param = platform_setting_table[args.deploy]['qw_params']
-                if node.op_type == 'ConvTranspose':
+                if node.op_type in ['ConvTranspose', 'MatMul']:
                     weight = weight.transpose(0, 1)
                 scale, q_min, q_max = get_quant_tensor(weight.shape, qw_param, weight_range)
                 rest = (weight / scale) - (weight / scale).floor()
@@ -101,7 +104,7 @@ def adaround(graph_ori, graph, act_clip_val, weight_clip_val, args):
                     weight,
                     round_mask, scale, q_min, q_max,
                     qw_param['per_channel'], soft=False)
-                if node.op_type == 'ConvTranspose':
+                if node.op_type in ['ConvTranspose', 'MatMul']:
                     new_rounded_weight = new_rounded_weight.transpose(0, 1)
             else:
                 new_rounded_weight = quant_weight_nnie(weight, round_mask, soft=False)
