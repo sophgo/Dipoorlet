@@ -1,2 +1,4 @@
 *.pyc
 dipoorlet.egg-info/
+build
+dist

@@ -1,0 +1,2 @@
+FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+RUN pip install --progress-bar on --no-cache-dir -v onnx==1.16.1 onnxsim onnxruntime-gpu==1.19 termcolor transformers==4.48
