@@ -174,6 +174,24 @@ imx_platform_settings = {
     'deploy_weight': True
 }
 
+sophgo_platform_settings = {
+    'deploy_exclude_layers': [],
+    'quant_nodes': basic_quant_node + ['Clip', 'HardSigmoid'],
+    'qi_params': {
+        'bit_width': 8,
+        'type': 'Linear',
+        'symmetric': True
+    },
+    'qw_params': {
+        'bit_width': 4,
+        'type': 'Linear',
+        'symmetric': True,
+        'per_channel': True
+    },
+    'quantize_network_output': True,
+    'deploy_weight': True,
+}
+
 platform_setting_table = {
     'trt': trt_platform_settings,
     'stpu': stpu_platform_settings,
@@ -182,5 +200,6 @@ platform_setting_table = {
     'atlas': atlas_platform_settings,
     'snpe': snpe_platform_settings,
     'ti': ti_platform_settings,
-    'imx': imx_platform_settings
+    'imx': imx_platform_settings,
+    'sophgo': sophgo_platform_settings,
 }

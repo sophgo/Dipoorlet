@@ -26,7 +26,7 @@ def quant_graph(onnx_graph, clip_val, args):
     for node in graph_q.graph.node:
         if node.name in args.skip_layers:
             continue
-        if node.name in platform_setting_table[args.deploy]['w4a4']:
+        if 'w4a4' in platform_setting_table[args.deploy] and node.name in platform_setting_table[args.deploy]['w4a4']:
             quant_node_list_w4a4.append(node)
             continue
         if args.optim_transformer and node.op_type == "Add": # add op set as float
@@ -70,11 +70,16 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
                 find_weight = True
                 if node.op_type == 'ConvTranspose' or node.op_type == 'MatMul':
                     need_transpose = True
-                if node.op_type == 'Gemm' or node.op_type == 'MatMul': 
-                    param['qw_params']['bit_width'] = 4
+                if node.op_type == 'Conv':
+                    group = [attr for attr in node.attribute if attr.name == 'group'][0]
+                    if group.i != 1 and args.deploy == 'sophgo':
+                        # sophgo does not support w4a8 depthwise conv
+                        qw_bw = param['qw_params']['bit_width']
+                        param['qw_params']['bit_width'] = 8
                     q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
-                                                   need_transpose)
-                    param['qw_params']['bit_width'] = 4
+                                                    need_transpose)
+                    if group.i != 1 and args.deploy == 'sophgo':
+                        param['qw_params']['bit_width'] = qw_bw
                 else:
                     q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
                                                     need_transpose)
