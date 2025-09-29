@@ -17,7 +17,7 @@ from .profiling import (quantize_profiling_multipass, quantize_profiling_transfo
 from .tensor_cali import tensor_calibration
 from .utils import (ONNXGraph, load_clip_val, logger, reduce_clip_val,
                     reduce_profiling_res, save_clip_val, save_profiling_res,
-                    setup_logger, deploy_QOperator)
+                    setup_logger, deploy_QOperator, update_act_clip_val)
 from .weight_transform import weight_calibration
 
 
@@ -53,6 +53,7 @@ parser.add_argument("--pattern", help="Sparse pattern", choices=["unstruction", 
 parser.add_argument("--optim_transformer", help="Transformer model optimization", default=False, action='store_true')
 parser.add_argument("--model_type", help="Transformer model type", choices=["unet", "swin", "vit"], default=None)
 parser.add_argument("--quant_format", default="QDQ", type=str, choices=["QOP", "QDQ"])
+parser.add_argument("--extra_calib_table", type=str, default=None, help="Path to extra calibration table to update activation clip values.")
 args = parser.parse_args()
 
 if args.slurm:
@@ -133,6 +134,9 @@ setattr(args, 'world_size', dist.get_world_size())
 if dist.get_rank() == 0:
     logger.info("Do tensor calibration...")
 act_clip_val, weight_clip_val = tensor_calibration(onnx_graph, args)
+if args.extra_calib_table is not None:
+    logger.info("Update act clip val...")
+    update_act_clip_val(act_clip_val, args.extra_calib_table)
 tensor_range = copy.deepcopy(act_clip_val)
 save_clip_val(act_clip_val, weight_clip_val, args,
               act_fname='act_clip_val.json.rank{}'.format(args.rank),

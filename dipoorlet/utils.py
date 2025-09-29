@@ -438,3 +438,39 @@ def deploy_QOperator(model, tensor_range, args):
     quantizer.quantize_model()
     model_output = os.path.join(args.output_dir, 'qop_model.onnx')
     quantizer.model.save_model_to_file(model_output)
+
+
+def match_op_name(op_name, ctable_keys):
+    match_keys = []
+    for key in ctable_keys:
+        if key.startswith(op_name):
+            match_keys.append(key)
+    return match_keys
+
+def update_act_clip_val(act_clip_val, ctable_path):
+    # Load existing ctable
+    calib_info = {} # op_name: [threshold, min, max]
+    op_names = []
+    with open(ctable_path, 'r') as f:
+        for line in f.readlines():
+            if line.startswith('#') or not line.strip():
+                continue
+            parts = line.strip().split(' ')
+            op_name = parts[0]
+            values = list(map(float, parts[1:]))
+            calib_info[op_name] = values
+            op_names.append(op_name)
+        
+    # Update ctable with new values
+    for op_name in act_clip_val:
+        match_keys = match_op_name(op_name, op_names)
+        if len(match_keys) == 1:
+            best_match = match_keys[0]
+            new_max_clip = calib_info[best_match][0]
+            new_min_clip = -new_max_clip if act_clip_val[op_name][0] < 0 else 0.0
+            logger.info(f"Update act clip val: {op_name} from {act_clip_val[op_name]} to {[new_min_clip, new_max_clip]}")
+            act_clip_val[op_name] = [np.array(new_min_clip, dtype=np.float32), np.array(new_max_clip, dtype=np.float32)]
+        elif len(match_keys) == 0:
+            logger.info(f"Update act clip val: No match for {op_name}, keep original value.")
+        else:
+           raise ValueError(f"Ambiguous match for {op_name}: matches {match_keys}")
