@@ -37,6 +37,7 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
             if node.op_type == "MatMul" and node.input[1] not in graph_ori.initializer:
                 continue
             block_layer_list = get_block_from_first(graph, node, args)
+            logger.info("Get block: "+" ".join([_node.name for _node in block_layer_list]))
             # If the last node has weight equalized, it cannot be the last.
             if args.we:
                 if node_has_equalized(graph, block_layer_list[-1]):
