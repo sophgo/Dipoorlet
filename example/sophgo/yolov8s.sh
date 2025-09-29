@@ -16,4 +16,5 @@ python scripts/generate_data_bins.py \
 python -m torch.distributed.launch --master_port=29500 --use_env -m dipoorlet \
         -M ${onnx_path} -I ${train_bin_dir} \
         -N ${train_data_number} -A mse -D sophgo --brecq --drop \
-        -O ${save_root} --extra_calib_table ${calib_table}
+        -O ${save_root} --extra_calib_table ${calib_table} \
+        --skip_layers /model.22/dfl/conv/Conv
