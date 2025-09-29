@@ -105,7 +105,8 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
                 _prev = graph.get_tensor_producer(in_tensor)
                 if _prev.op_type == 'Sigmoid':
                     continue
-            q_nodes, _, _ = get_qnode_by_param(param['qi_params'], in_tensor, shape, data_range_list[in_tensor])
+            signed = data_range_list[in_tensor][0] < 0
+            q_nodes, _, _ = get_qnode_by_param(param['qi_params'], in_tensor, shape, data_range_list[in_tensor], signed=signed)
 
         if q_nodes is not None:
             node.input[idx] = q_nodes.output[0].name
@@ -224,8 +225,9 @@ def insert_fake_quant_node_output(graph, clip_val, args):
     param = platform_setting_table[args.deploy]
     out_tensor_list = copy.deepcopy(graph.network_outputs)
     for out_tensor in out_tensor_list:
+        signed = clip_val[out_tensor][0] < 0
         q_nodes, _, _ = get_qnode_by_param(param['qi_params'], out_tensor, graph.get_tensor_shape(out_tensor),
-                                           clip_val[out_tensor])
+                                           clip_val[out_tensor], signed=signed)
         graph.insert_qnodes_purely(q_nodes=q_nodes, idx=graph.index(graph.get_tensor_producer(out_tensor)) + 1)
         graph.del_network_output(out_tensor)
         graph.add_network_output(q_nodes.output[0])
@@ -233,7 +235,7 @@ def insert_fake_quant_node_output(graph, clip_val, args):
     return
 
 
-def get_qnode_by_param(param, in_tensor_name, tensor_shape, range, need_transpose=False):
+def get_qnode_by_param(param, in_tensor_name, tensor_shape, range, need_transpose=False, signed=True):
     bit_width = param['bit_width']
     zero_point = [0]
     per_channel = True
@@ -256,8 +258,12 @@ def get_qnode_by_param(param, in_tensor_name, tensor_shape, range, need_transpos
             else:
                 channel_num = len(range[0])
             # 8bit -128-127 actually identical to -127-127
-            q_min = [-2 ** (bit_width - 1) + 1] * channel_num
-            q_max = [2 ** (bit_width - 1) - 1] * channel_num
+            if signed:
+                q_min = [-2 ** (bit_width - 1) + 1] * channel_num
+                q_max = [2 ** (bit_width - 1) - 1] * channel_num
+            else:
+                q_min = [0] * channel_num
+                q_max = [2 ** bit_width - 1] * channel_num
             data_max = np.max(np.abs(range), axis=0)
             scale = np.array(data_max) / q_max
             if np.any(scale == 0):

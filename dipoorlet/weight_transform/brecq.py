@@ -114,7 +114,8 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                 if args.deploy != 'nnie':
                     acti_shape = graph.get_tensor_shape(following_node.output[0])
                     qi_param = platform_setting_table[args.deploy]['qi_params']
-                    scale, q_min, q_max = get_quant_tensor(acti_shape, qi_param, acti_range)
+                    signed = acti_range[0] < 0
+                    scale, q_min, q_max = get_quant_tensor(acti_shape, qi_param, acti_range, signed=signed)
                     qi_tensor = {'scale': scale,
                                  'q_min': q_min,
                                  'q_max': q_max,

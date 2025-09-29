@@ -57,8 +57,8 @@ def update_weight(graph, weight_tensor, weight_name):
     graph.set_initializer(name, weight_tensor)
 
 
-def get_quant_tensor(weight_shape, param, weight_range):
-    q_nodes, q_min, q_max = get_qnode_by_param(param, 'tmp', weight_shape, weight_range)
+def get_quant_tensor(weight_shape, param, weight_range, signed=True):
+    q_nodes, q_min, q_max = get_qnode_by_param(param, 'tmp', weight_shape, weight_range, signed=signed)
     scale = None
     for init in q_nodes.initializer:
         if init.name == 'tmp_scale':
