@@ -101,7 +101,7 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
                 if _prev.op_type == 'Conv' or _prev.op_type == 'MatMul':
                     trt_merge_add = True
                     continue
-            if (args.deploy == 'stpu') and node.op_type == 'Mul':
+            if (args.deploy == 'sophgo') and node.op_type == 'Mul':
                 _prev = graph.get_tensor_producer(in_tensor)
                 if _prev.op_type == 'Sigmoid':
                     continue

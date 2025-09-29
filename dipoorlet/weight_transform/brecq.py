@@ -96,9 +96,19 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                     rest = nnie_rest_init(weight)
 
                 # Generate torch qlayer.
-                relu_flag = follow_relu(graph, _node)
+                if follow_relu(graph, _node):
+                    act_func_type = 'relu'
+                elif follow_silu(graph, _node):
+                    act_func_type = 'silu'
+                else:
+                    act_func_type = None
                 # get acti quantization param
-                following_node = following_relu(graph, _node) if relu_flag else _node
+                if act_func_type == 'relu':
+                    following_node = following_relu(graph, _node)
+                elif act_func_type == 'silu':
+                    following_node = following_silu(graph, _node)
+                else:
+                    following_node = _node
                 acti_range = clip_val[following_node.output[0]]
                 if args.deploy != 'nnie':
                     acti_shape = graph.get_tensor_shape(following_node.output[0])
@@ -113,14 +123,29 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                     max_value = torch.from_numpy(np.array(max_value).astype(np.float32)).cuda()
                     qi_tensor = {'max_value': max_value,
                                  'type': 'NNIE'}
+                if act_func_type == 'silu':
+                    acti_shape = graph.get_tensor_shape(_node.output[0])
+                    qi_param = platform_setting_table[args.deploy]['qi_params']
+                    scale, q_min, q_max = get_quant_tensor(acti_shape, qi_param, acti_range)
+                    qmid_tensor = {'scale': scale,
+                                   'q_min': q_min,
+                                   'q_max': q_max,
+                                   'type': 'Linear'}
                 ada_layer_list.append(
                     AdaQLayer(_node, weight, bias, rest, reg, qw_tensor, qi_tensor,
-                              relu_flag, _node.op_type, args.acti_quant)
+                              act_func_type, _node.op_type, args.acti_quant, qmid_tensor)
                 )
             # Block output follow relu.
-            relu_flag = follow_relu(graph, block_layer_list[-1])
-            if relu_flag:
+            if follow_relu(graph, block_layer_list[-1]):
+                act_func_type = 'relu'
+            elif follow_silu(graph, block_layer_list[-1]):
+                act_func_type = 'silu'
+            else:
+                act_func_type = None
+            if act_func_type == 'relu':
                 fp_out_tensor = torch.nn.Parameter(F.relu(torch.from_numpy(fp_out_tensor)), False)
+            elif act_func_type == 'silu':
+                fp_out_tensor = torch.nn.Parameter(F.silu(torch.from_numpy(fp_out_tensor)), False)
             else:
                 fp_out_tensor = torch.nn.Parameter(torch.from_numpy(fp_out_tensor), False)
             # Learning.

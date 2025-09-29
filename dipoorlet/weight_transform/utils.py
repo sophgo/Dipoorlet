@@ -5,7 +5,9 @@ from onnx import numpy_helper
 from ..quantize import get_qnode_by_param
 
 LEARNABLE_LAYER_TYPES = ['Conv', 'Gemm', 'ConvTranspose', 'MatMul']
-__all__ = ['LEARNABLE_LAYER_TYPES', 'follow_relu', 'following_relu', 'update_weight', 'get_quant_tensor', 'get_block_from_first']
+__all__ = ['LEARNABLE_LAYER_TYPES', 'follow_relu', 'following_relu',
+           'update_weight', 'get_quant_tensor', 'get_block_from_first',
+           'follow_silu', 'following_silu']
 
 
 def follow_relu(graph, node):
@@ -13,6 +15,24 @@ def follow_relu(graph, node):
     nxt_node = graph.get_tensor_consumer(conv_out)
     return len(nxt_node) == 1 and not isinstance(nxt_node[0], str) and nxt_node[0].op_type == 'Relu'
 
+def follow_silu(graph, node):
+    conv_out = node.output[0]
+    nxt_node = graph.get_tensor_consumer(conv_out)
+    if len(nxt_node) == 1 and not isinstance(nxt_node[0], str) and nxt_node[0].op_type == 'SiLU':
+        return True
+    if len(nxt_node) == 2:
+        mul_node = None
+        sigmoid_node = None
+        if nxt_node[0].op_type == 'Mul' and nxt_node[1].op_type == 'Sigmoid':
+            mul_node = nxt_node[0]
+            sigmoid_node = nxt_node[1]
+        if nxt_node[1].op_type == 'Mul' and nxt_node[0].op_type == 'Sigmoid':
+            mul_node = nxt_node[1]
+            sigmoid_node = nxt_node[0]
+        if mul_node is not None and sigmoid_node is not None:
+            if sigmoid_node.output[0] in mul_node.input:
+                return True
+    return False
 
 def following_relu(graph, node):
     conv_out = node.output[0]
@@ -20,6 +40,17 @@ def following_relu(graph, node):
     assert nxt_node[0].op_type == 'Relu'
     return nxt_node[0]
 
+def following_silu(graph, node):
+    conv_out = node.output[0]
+    nxt_node = graph.get_tensor_consumer(conv_out)
+    if len(nxt_node) == 1 and not isinstance(nxt_node[0], str) and nxt_node[0].op_type == 'SiLU':
+        return nxt_node[0]
+    if len(nxt_node) == 2:
+        if nxt_node[0].op_type == 'Mul' and nxt_node[1].op_type == 'Sigmoid':
+            return nxt_node[0]
+        if nxt_node[1].op_type == 'Mul' and nxt_node[0].op_type == 'Sigmoid':
+            return nxt_node[1]
+    raise ValueError('No following silu node found.')
 
 def update_weight(graph, weight_tensor, weight_name):
     name = graph.initializer[weight_name][0].name
@@ -54,6 +85,8 @@ def get_quant_tensor(weight_shape, param, weight_range):
 def get_block_from_first(graph, node, args):
     res = [node]
     while True:
+        if follow_silu(graph, res[-1]):
+            node = following_silu(graph, res[-1])
         next_node = graph.get_tensor_consumer(node.output[0])
         if len(next_node) != 1 or isinstance(next_node[0], str) or next_node[0].op_type not in LEARNABLE_LAYER_TYPES + ['Relu']:
             return res

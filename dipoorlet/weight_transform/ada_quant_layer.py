@@ -131,10 +131,11 @@ class TempDecay:
 
 
 class AdaQLayer(torch.nn.Module):
-    def __init__(self, node, weight, bias, rest, reg, qw_tensor, qi_tensor, relu_flag, type, acti_quant):
+    def __init__(self, node, weight, bias, rest, reg, qw_tensor, qi_tensor, act_func_type, type, acti_quant, qmid_tensor=None):
         super(AdaQLayer, self).__init__()
         self.qw_tensor = qw_tensor
         self.qi_tensor = qi_tensor
+        self.qmid_tensor = qmid_tensor
         self.type = type
         self.transposed = False
         self.attr_name_map = {}
@@ -148,9 +149,7 @@ class AdaQLayer(torch.nn.Module):
         else:
             self.layer = self.build_torch_deconv(node, weight, bias)
             self.transposed = True
-        self.relu_flag = relu_flag
-        if relu_flag:
-            self.relu = nn.ReLU()
+        self.act_func_type = act_func_type
         # Init alpha.
         rest = -torch.log((reg.zeta - reg.gamma) / (rest - reg.gamma) - 1)
         self.round_mask = torch.nn.Parameter(rest.cuda(), True)
@@ -260,8 +259,16 @@ class AdaQLayer(torch.nn.Module):
                 self.layer.output_padding,
                 self.layer.groups,
                 self.layer.dilation)
-        if self.relu_flag:
+        if self.qmid_tensor is not None:
+            if self.qmid_tensor['type'] == 'Linear':
+                x = quant_acti(x, self.qmid_tensor['scale'], self.qmid_tensor['q_min'],
+                               self.qmid_tensor['q_max'], self.drop_ratio)
+            elif self.qmid_tensor['type'] == 'NNIE':
+                x = quant_acti_nnie(x, self.qmid_tensor['max_value'], self.drop_ratio)
+        if self.act_func_type == 'relu':
             x = F.relu(x)
+        elif self.act_func_type == 'silu':
+            x = F.silu(x)
         if self.acti_quant and self.qi_tensor['type'] == 'Linear':
             x = quant_acti(x, self.qi_tensor['scale'], self.qi_tensor['q_min'],
                            self.qi_tensor['q_max'], self.drop_ratio)
