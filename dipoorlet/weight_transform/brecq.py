@@ -125,6 +125,7 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                     max_value = torch.from_numpy(np.array(max_value).astype(np.float32)).cuda()
                     qi_tensor = {'max_value': max_value,
                                  'type': 'NNIE'}
+                qmid_tensor = None
                 if act_func_type == 'silu':
                     acti_shape = graph.get_tensor_shape(_node.output[0])
                     qi_param = platform_setting_table[args.deploy]['qi_params']
