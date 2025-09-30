@@ -46,7 +46,7 @@ def quant_graph(onnx_graph, clip_val, args):
 
 
 def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
-    param = platform_setting_table[args.deploy]
+    param = copy.deepcopy(platform_setting_table[args.deploy])
     # We now quant input and weight tp INT8 but left output fp32.
     find_weight = False
     trt_merge_add = False
@@ -70,16 +70,18 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
                 find_weight = True
                 if node.op_type == 'ConvTranspose' or node.op_type == 'MatMul':
                     need_transpose = True
+                if args.w8_threshold is not None:
+                    min_weight = np.min(data_range_list[in_tensor])
+                    max_weight = np.max(data_range_list[in_tensor])
+                    if (min_weight < -args.w8_threshold) or (max_weight > args.w8_threshold):
+                        param['qw_params']['bit_width'] = 8
                 if node.op_type == 'Conv':
                     group = [attr for attr in node.attribute if attr.name == 'group'][0]
                     if group.i != 1 and args.deploy == 'sophgo':
                         # sophgo does not support w4a8 depthwise conv
                         qw_bw = param['qw_params']['bit_width']
-                        param['qw_params']['bit_width'] = 8
                     q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
                                                     need_transpose)
-                    if group.i != 1 and args.deploy == 'sophgo':
-                        param['qw_params']['bit_width'] = qw_bw
                 else:
                     q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
                                                     need_transpose)

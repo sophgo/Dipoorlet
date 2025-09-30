@@ -1,4 +1,6 @@
 import copy
+import json
+import os.path as osp
 
 import numpy as np
 import torch
@@ -29,6 +31,8 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
     fp_act_cache = ActivationCache(graph_ori, args, rank_st, rank_ed)
     prev_act_cache = None
     already = []
+    w8_nodes = {}
+    dw_convs = {}
     _log_head = 'Qdrop' if args.drop is True else 'Brecq'
     for node in graph_ori.graph.node:
         if node.name in args.skip_layers:
@@ -78,9 +82,31 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                 # Get quantization param.
                 if args.deploy != 'nnie':
                     weight_range = clip_val[_node.input[1]]
-                    qw_param = platform_setting_table[args.deploy]['qw_params']
+                    qw_param = platform_setting_table[args.deploy]['qw_params'].copy()
                     if _node.op_type == 'ConvTranspose' or _node.op_type == 'MatMul':
                         weight = weight.transpose(0, 1)
+                    if _node.op_type == 'Conv':
+                        group = [attr for attr in _node.attribute if attr.name == 'group'][0]
+                        if group.i != 1:
+                            qw_param['bit_width'] = 8
+                            dw_convs[_node.name] = {
+                                'op_type': _node.op_type,
+                                'group': group.i,
+                                'inputs': [i for i in _node.input],
+                                'outputs': [o for o in _node.output]
+                            }
+
+                    if args.w8_threshold is not None:
+                        min_weight = np.min(weight_range)
+                        max_weight = np.max(weight_range)
+                        if (min_weight < -args.w8_threshold) or (max_weight > args.w8_threshold):
+                            qw_param['bit_width'] = 8
+                            w8_nodes[_node.name] = {
+                                'op_type': _node.op_type,
+                                'range': (float(min_weight), float(max_weight)),
+                                'inputs': [i for i in _node.input],
+                                'outputs': [o for o in _node.output]
+                            }
                     scale, q_min, q_max = get_quant_tensor(weight.shape, qw_param, weight_range)
                     rest = (weight / scale) - (weight / scale).floor()
                     qw_tensor = {'scale': scale,
@@ -164,10 +190,18 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                 weight = torch.from_numpy(weight).cuda()
                 round_mask = round_mask_list[idx]
                 if args.deploy != 'nnie':
-                    weight_range = clip_val[_node.input[1]]
+                    weight_range = clip_val[_node.input[1]].copy()
                     qw_param = platform_setting_table[args.deploy]['qw_params']
                     if _node.op_type == 'ConvTranspose' or _node.op_type == 'MatMul':
                         weight = weight.transpose(0, 1)
+                    if _node.op_type == 'Conv':
+                        group = [attr for attr in _node.attribute if attr.name == 'group'][0]
+                        if group.i != 1: qw_param['bit_width'] = 8
+                    if args.w8_threshold is not None:
+                        min_weight = np.min(weight_range)
+                        max_weight = np.max(weight_range)
+                        if (min_weight < -args.w8_threshold) or (max_weight > args.w8_threshold):
+                            qw_param['bit_width'] = 8
                     scale, q_min, q_max = get_quant_tensor(weight.shape, qw_param, weight_range)
                     new_rounded_weight = quant_weight(
                         weight,
@@ -184,6 +218,12 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
             graph_q.update_model()
     if dist.get_rank() == 0:
         graph_brecq.save_onnx_model('brecq')
+        if args.w8_threshold is not None:
+            with open(osp.join(args.output_dir, 'brecq_w8_nodes.json'), 'w') as f:
+                json.dump(w8_nodes, f, indent=4)
+        if len(dw_convs) > 0:
+            with open(osp.join(args.output_dir, 'brecq_dw_convs.json'), 'w') as f:
+                json.dump(dw_convs, f, indent=4)
     # We must use original ranges.
     return graph_brecq
 
