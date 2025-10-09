@@ -190,8 +190,8 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                 weight = torch.from_numpy(weight).cuda()
                 round_mask = round_mask_list[idx]
                 if args.deploy != 'nnie':
-                    weight_range = clip_val[_node.input[1]].copy()
-                    qw_param = platform_setting_table[args.deploy]['qw_params']
+                    weight_range = clip_val[_node.input[1]]
+                    qw_param = platform_setting_table[args.deploy]['qw_params'].copy()
                     if _node.op_type == 'ConvTranspose' or _node.op_type == 'MatMul':
                         weight = weight.transpose(0, 1)
                     if _node.op_type == 'Conv':
