@@ -316,6 +316,8 @@ def get_qnode_by_param(param, in_tensor_name, tensor_shape, range, need_transpos
             scale = 2 ** np.round(np.log2(scale))
         scale = np.array(scale, dtype=np.float32)
         zero_point = np.full(scale.shape, zero_point, dtype=np.int8)
+        if not signed:
+            zero_point -= 128
         q_nodes = make_quant_dequant(in_tensor_name,
                                      tensor_shape,
                                      scale,
