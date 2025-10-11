@@ -8,7 +8,7 @@ import sys
 import numpy as np
 import onnx
 import torch.distributed as dist
-from onnx import TensorProto, numpy_helper
+from onnx import TensorProto, numpy_helper, OperatorSetIdProto, AttributeProto
 from onnx.external_data_helper import convert_model_to_external_data
 from onnxruntime.quantization.onnx_quantizer import ONNXQuantizer
 from onnxruntime.quantization.quant_utils import QuantizationMode, QuantType
@@ -474,3 +474,44 @@ def update_act_clip_val(act_clip_val, ctable_path):
             logger.info(f"Update act clip val: No match for {op_name}, keep original value.")
         else:
            raise ValueError(f"Ambiguous match for {op_name}: matches {match_keys}")
+        
+
+def ensure_opset_import(model, domain, version):
+        for imp in model.opset_import:
+            if imp.domain == domain:
+                if imp.version < version:
+                    imp.version = version
+                return
+        imp = OperatorSetIdProto()
+        imp.domain = domain
+        imp.version = version
+        model.opset_import.append(imp)
+
+
+def rewrite_onnx_gelu(onnx_path):
+    new_domain = "com.microsoft"
+    new_domain_version = 1
+    changed = False
+    def rewrite_graph(graph):
+        for node in graph.node:
+            # 命中条件则修改
+            if node.op_type == 'GELU':
+                node.domain = new_domain
+                node.op_type = "Gelu"
+                nonlocal changed
+                changed = True
+
+            # 递归处理子图属性
+            for attr in node.attribute:
+                if attr.type == AttributeProto.GRAPH:
+                    rewrite_graph(attr.g)
+                elif attr.type == AttributeProto.GRAPHS:
+                    for g in attr.graphs:
+                        rewrite_graph(g)
+    model = onnx.load(onnx_path)
+    rewrite_graph(model.graph)
+    if changed:
+        logger.info(f"Rewrote GELU to com.microsoft.Gelu in {onnx_path}")
+        ensure_opset_import(model, new_domain, new_domain_version)
+        onnx.checker.check_model(model)
+        onnx.save(model, onnx_path)

@@ -17,7 +17,8 @@ from .profiling import (quantize_profiling_multipass, quantize_profiling_transfo
 from .tensor_cali import tensor_calibration
 from .utils import (ONNXGraph, load_clip_val, logger, reduce_clip_val,
                     reduce_profiling_res, save_clip_val, save_profiling_res,
-                    setup_logger, deploy_QOperator, update_act_clip_val)
+                    setup_logger, deploy_QOperator, update_act_clip_val,
+                    rewrite_onnx_gelu)
 from .weight_transform import weight_calibration
 
 
@@ -80,6 +81,7 @@ if dist.get_rank() == 0:
         os.makedirs(args.output_dir)
     setup_logger(args)
 
+    rewrite_onnx_gelu(args.model)
     if args.optim_transformer:
         model_path = ('/').join(args.model.split('/')[:-1])
         args.infer_shape_dir = os.path.join(os.path.abspath(model_path), "infer_shape.onnx")
@@ -98,7 +100,6 @@ logger.parent = None
 
 start = time.time()
 if args.optim_transformer:
-    replacements = [] 
     model = onnx.load(args.optimzed_model_dir)
     taken: set[str] = {n.name for n in model.graph.node if n.name}
     for node in model.graph.node:
