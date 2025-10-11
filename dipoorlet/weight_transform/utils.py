@@ -7,17 +7,23 @@ from ..quantize import get_qnode_by_param
 LEARNABLE_LAYER_TYPES = ['Conv', 'Gemm', 'ConvTranspose', 'MatMul']
 __all__ = ['LEARNABLE_LAYER_TYPES', 'follow_relu', 'following_relu',
            'update_weight', 'get_quant_tensor', 'get_block_from_first',
-           'follow_silu', 'following_silu']
+           'follow_nolinear', 'following_nolinear', 'follow_bias_after_matmul']
 
+
+def follow_bias_after_matmul(graph, node):
+    node_out = node.output[0]
+    nxt_node = graph.get_tensor_consumer(node_out)
+    return len(nxt_node) == 1 and not isinstance(nxt_node[0], str) and nxt_node[0].op_type == 'Add' and \
+            (nxt_node[0].input[1] in graph.initializer or nxt_node[0].input[0] in graph.initializer)
 
 def follow_relu(graph, node):
-    conv_out = node.output[0]
-    nxt_node = graph.get_tensor_consumer(conv_out)
+    node_out = node.output[0]
+    nxt_node = graph.get_tensor_consumer(node_out)
     return len(nxt_node) == 1 and not isinstance(nxt_node[0], str) and nxt_node[0].op_type == 'Relu'
 
 def follow_silu(graph, node):
-    conv_out = node.output[0]
-    nxt_node = graph.get_tensor_consumer(conv_out)
+    node_out = node.output[0]
+    nxt_node = graph.get_tensor_consumer(node_out)
     if len(nxt_node) == 1 and not isinstance(nxt_node[0], str) and nxt_node[0].op_type == 'SiLU':
         return True
     if len(nxt_node) == 2:
@@ -34,15 +40,33 @@ def follow_silu(graph, node):
                 return True
     return False
 
+def follow_gelu(graph, node):
+    if node.op_type == 'MatMul' and follow_bias_after_matmul(graph, node):
+        node_out = graph.get_tensor_consumer(node.output[0])[0].output[0]
+    else:
+        node_out = node.output[0]
+    nxt_node = graph.get_tensor_consumer(node_out)
+    return len(nxt_node) == 1 and not isinstance(nxt_node[0], str) and nxt_node[0].op_type == 'Gelu'
+
+def follow_nolinear(graph, node):
+    nolinear_type = None
+    if follow_relu(graph, node):
+        nolinear_type = 'relu'
+    elif follow_silu(graph, node):
+        nolinear_type = 'silu'
+    elif follow_gelu(graph, node):
+        nolinear_type = 'gelu'
+    return nolinear_type
+
 def following_relu(graph, node):
-    conv_out = node.output[0]
-    nxt_node = graph.get_tensor_consumer(conv_out)
+    node_out = node.output[0]
+    nxt_node = graph.get_tensor_consumer(node_out)
     assert nxt_node[0].op_type == 'Relu'
     return nxt_node[0]
 
 def following_silu(graph, node):
-    conv_out = node.output[0]
-    nxt_node = graph.get_tensor_consumer(conv_out)
+    node_out = node.output[0]
+    nxt_node = graph.get_tensor_consumer(node_out)
     if len(nxt_node) == 1 and not isinstance(nxt_node[0], str) and nxt_node[0].op_type == 'SiLU':
         return nxt_node[0]
     if len(nxt_node) == 2:
@@ -51,6 +75,25 @@ def following_silu(graph, node):
         if nxt_node[1].op_type == 'Mul' and nxt_node[0].op_type == 'Sigmoid':
             return nxt_node[1]
     raise ValueError('No following silu node found.')
+
+def following_gelu(graph, node):
+    if node.op_type == 'MatMul' and follow_bias_after_matmul(graph, node):
+        node_out = graph.get_tensor_consumer(node.output[0])[0].output[0]
+    else:
+        node_out = node.output[0]
+    nxt_node = graph.get_tensor_consumer(node_out)
+    assert nxt_node[0].op_type == 'Gelu'
+    return nxt_node[0]
+
+def following_nolinear(graph, node, nolinear_type):
+    following_node = node
+    if nolinear_type == 'relu':
+        following_node = following_relu(graph, node)
+    elif nolinear_type == 'silu':
+        following_node = following_silu(graph, node)
+    elif nolinear_type == 'gelu':
+        following_node = following_gelu(graph, node)
+    return following_node
 
 def update_weight(graph, weight_tensor, weight_name):
     name = graph.initializer[weight_name][0].name
@@ -87,6 +130,8 @@ def get_block_from_first(graph, node, args):
     while True:
         if follow_silu(graph, res[-1]):
             node = following_silu(graph, res[-1])
+        elif follow_gelu(graph, res[-1]):
+            node = following_gelu(graph, res[-1])
         next_node = graph.get_tensor_consumer(node.output[0])
         if len(next_node) != 1 or isinstance(next_node[0], str) or next_node[0].op_type not in LEARNABLE_LAYER_TYPES + ['Relu']:
             return res

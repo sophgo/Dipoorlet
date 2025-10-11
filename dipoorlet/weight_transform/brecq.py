@@ -66,7 +66,12 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                 in_tensor_name = prev_node.output[0]
             q_in_tensor = np.stack(q_act_cache[in_tensor_name])
             fp_in_tensor = np.stack(fp_act_cache[block_layer_list[0].input[0]])
-            fp_out_tensor = np.stack(fp_act_cache[block_layer_list[-1].output[0]])
+            if block_layer_list[-1].op_type == 'MatMul' and follow_bias_after_matmul(graph_brecq, block_layer_list[-1]):
+                add_node = graph_brecq.get_tensor_consumer(block_layer_list[-1].output[0])[0]
+                out_tensor_name = add_node.output[0]
+            else:
+                out_tensor_name = block_layer_list[-1].output[0]
+            fp_out_tensor = np.stack(fp_act_cache[out_tensor_name])
             prev_act_cache = q_act_cache.activation_cache.copy()
             # Use one reg for seq.
             total_iter = args.ada_epoch * len(block_layer_list) * np.ceil(num_per_rank / args.ada_bs)
@@ -79,6 +84,13 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                 bias = None
                 if len(_node.input) == 3:
                     bias = numpy_helper.to_array(graph_brecq.initializer[_node.input[2]][0])
+                if _node.op_type == 'MatMul' and follow_bias_after_matmul(graph_brecq, _node):
+                    add_node = graph_brecq.get_tensor_consumer(_node.output[0])[0]
+                    if add_node.input[0] == _node.output[0]:
+                        bias = numpy_helper.to_array(graph_brecq.initializer[add_node.input[1]][0])
+                    else:
+                        bias = numpy_helper.to_array(graph_brecq.initializer[add_node.input[0]][0])
+                    logger.info("Find bias after matmul for node: {}".format(_node.name))
                 # Get quantization param.
                 if args.deploy != 'nnie':
                     weight_range = clip_val[_node.input[1]]
@@ -123,19 +135,10 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                     rest = nnie_rest_init(weight)
 
                 # Generate torch qlayer.
-                if follow_relu(graph, _node):
-                    act_func_type = 'relu'
-                elif follow_silu(graph, _node):
-                    act_func_type = 'silu'
-                else:
-                    act_func_type = None
+                act_func_type = follow_nolinear(graph, _node)
+                logger.info("Following act func for node {}: {}".format(_node.name, act_func_type))
                 # get acti quantization param
-                if act_func_type == 'relu':
-                    following_node = following_relu(graph, _node)
-                elif act_func_type == 'silu':
-                    following_node = following_silu(graph, _node)
-                else:
-                    following_node = _node
+                following_node = following_nolinear(graph, _node, act_func_type)
                 acti_range = clip_val[following_node.output[0]]
                 if args.deploy != 'nnie':
                     acti_shape = graph.get_tensor_shape(following_node.output[0])
@@ -152,8 +155,13 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                     qi_tensor = {'max_value': max_value,
                                  'type': 'NNIE'}
                 qmid_tensor = None
-                if act_func_type == 'silu':
-                    acti_shape = graph.get_tensor_shape(_node.output[0])
+                if act_func_type in ['silu', 'gelu']:
+                    if _node.op_type == 'MatMul' and follow_bias_after_matmul(graph_brecq, _node):
+                        mid_out = graph_brecq.get_tensor_consumer(_node.output[0])[0].output[0]
+                    else:
+                        mid_out = _node.output[0]
+                    acti_range = clip_val[mid_out]
+                    acti_shape = graph.get_tensor_shape(mid_out)
                     qi_param = platform_setting_table[args.deploy]['qi_params']
                     scale, q_min, q_max = get_quant_tensor(acti_shape, qi_param, acti_range)
                     qmid_tensor = {'scale': scale,
@@ -164,17 +172,14 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                     AdaQLayer(_node, weight, bias, rest, reg, qw_tensor, qi_tensor,
                               act_func_type, _node.op_type, args.acti_quant, qmid_tensor)
                 )
-            # Block output follow relu.
-            if follow_relu(graph, block_layer_list[-1]):
-                act_func_type = 'relu'
-            elif follow_silu(graph, block_layer_list[-1]):
-                act_func_type = 'silu'
-            else:
-                act_func_type = None
+            # Block output follow relu, silu or gelu.
+            act_func_type = follow_nolinear(graph, block_layer_list[-1])
             if act_func_type == 'relu':
                 fp_out_tensor = torch.nn.Parameter(F.relu(torch.from_numpy(fp_out_tensor)), False)
             elif act_func_type == 'silu':
                 fp_out_tensor = torch.nn.Parameter(F.silu(torch.from_numpy(fp_out_tensor)), False)
+            elif act_func_type == 'gelu':
+                fp_out_tensor = torch.nn.Parameter(F.gelu(torch.from_numpy(fp_out_tensor)), False)
             else:
                 fp_out_tensor = torch.nn.Parameter(torch.from_numpy(fp_out_tensor), False)
             # Learning.

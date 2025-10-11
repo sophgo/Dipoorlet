@@ -269,6 +269,8 @@ class AdaQLayer(torch.nn.Module):
             x = F.relu(x)
         elif self.act_func_type == 'silu':
             x = F.silu(x)
+        elif self.act_func_type == 'gelu':
+            x = F.gelu(x)
         if self.acti_quant and self.qi_tensor['type'] == 'Linear':
             x = quant_acti(x, self.qi_tensor['scale'], self.qi_tensor['q_min'],
                            self.qi_tensor['q_max'], self.drop_ratio)
