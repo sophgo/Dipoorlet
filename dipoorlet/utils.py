@@ -473,7 +473,12 @@ def update_act_clip_val(act_clip_val, ctable_path):
         elif len(match_keys) == 0:
             logger.info(f"Update act clip val: No match for {op_name}, keep original value.")
         else:
-            raise ValueError(f"Ambiguous match for {op_name}: matches {match_keys}")
+            logger.info(f"Ambiguous match for {op_name}: matches {match_keys}")
+            best_match = min(match_keys, key=lambda k: len(k))
+            new_max_clip = calib_info[best_match][0]
+            new_min_clip = -new_max_clip if act_clip_val[op_name][0] < 0 else 0.0
+            logger.info(f"Update act clip val: {op_name} from {act_clip_val[op_name]} to {[new_min_clip, new_max_clip]}")
+            act_clip_val[op_name] = [np.array(new_min_clip, dtype=np.float32), np.array(new_max_clip, dtype=np.float32)]
         
 
 def ensure_opset_import(model, domain, version):
