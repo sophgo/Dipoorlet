@@ -473,7 +473,7 @@ def update_act_clip_val(act_clip_val, ctable_path):
         elif len(match_keys) == 0:
             logger.info(f"Update act clip val: No match for {op_name}, keep original value.")
         else:
-           raise ValueError(f"Ambiguous match for {op_name}: matches {match_keys}")
+            raise ValueError(f"Ambiguous match for {op_name}: matches {match_keys}")
         
 
 def ensure_opset_import(model, domain, version):

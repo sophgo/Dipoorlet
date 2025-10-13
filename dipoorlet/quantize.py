@@ -29,8 +29,14 @@ def quant_graph(onnx_graph, clip_val, args):
         if 'w4a4' in platform_setting_table[args.deploy] and node.name in platform_setting_table[args.deploy]['w4a4']:
             quant_node_list_w4a4.append(node)
             continue
-        if args.optim_transformer and node.op_type == "Add": # add op set as float
-            continue
+        if node.op_type == "Add": # skip matmul bias
+            input_producers = [graph_q.get_tensor_producer(inp) for inp in node.input]
+            # one matmul, one in initializer
+            if len(input_producers) == 2:
+                if any([prod.op_type == "MatMul" for prod in input_producers if not isinstance(prod, str)]) and \
+                   any([inp in graph_q.initializer for inp in node.input]):
+                    print(f"Skip Add node {node.name} for bias quant.")
+                    continue
         if node.op_type in platform_setting_table[args.deploy]['quant_nodes']:
             quant_node_list.append(node)
 
@@ -107,6 +113,18 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
                 _prev = graph.get_tensor_producer(in_tensor)
                 if _prev.op_type == 'Sigmoid':
                     continue
+
+            if (args.deploy == 'sophgo') and node.op_type == 'Add':
+                _prev = graph.get_tensor_producer(in_tensor)
+                if _prev.op_type == 'Add':
+                    input_producers = [graph.get_tensor_producer(inp) for inp in _prev.input]
+                    if len(input_producers) != 2:
+                        pass
+                    elif any([prod.op_type == "MatMul" for prod in input_producers if not isinstance(prod, str)]) and \
+                        any([inp in graph.initializer for inp in _prev.input]):
+                        pass
+                    else:
+                        continue
             signed = data_range_list[in_tensor][0] < 0
             q_nodes, _, _ = get_qnode_by_param(param['qi_params'], in_tensor, shape, data_range_list[in_tensor], signed=signed)
 
