@@ -114,7 +114,7 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
                 if _prev.op_type == 'Sigmoid':
                     continue
 
-            if (args.deploy == 'sophgo') and node.op_type == 'Add':
+            if (args.deploy == 'sophgo') and node.op_type == 'Add' and args.optim_transformer:
                 _prev = graph.get_tensor_producer(in_tensor)
                 if _prev.op_type == 'Add':
                     input_producers = [graph.get_tensor_producer(inp) for inp in _prev.input]
