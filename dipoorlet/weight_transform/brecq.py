@@ -108,7 +108,7 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                                 'outputs': [o for o in _node.output]
                             }
 
-                    if args.w8_threshold is not None:
+                    if qw_param['bit_width'] < 8 and args.w8_threshold is not None:
                         min_weight = np.min(weight_range)
                         max_weight = np.max(weight_range)
                         if (min_weight < -args.w8_threshold) or (max_weight > args.w8_threshold):

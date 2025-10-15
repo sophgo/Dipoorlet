@@ -86,10 +86,7 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
                     if group.i != 1 and args.deploy == 'sophgo':
                         # sophgo does not support w4a8 depthwise conv
                         param['qw_params']['bit_width'] = 8
-                    q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
-                                                    need_transpose)
-                else:
-                    q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
+                q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
                                                     need_transpose)
 
             elif 'qb_params' in param:
