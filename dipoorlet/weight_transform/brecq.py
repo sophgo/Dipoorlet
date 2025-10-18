@@ -108,16 +108,28 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                                 'outputs': [o for o in _node.output]
                             }
 
-                    if qw_param['bit_width'] < 8 and args.w8_threshold is not None:
+                    if qw_param['bit_width'] < 8 and args.w8_max_threshold is not None:
                         min_weight = np.min(weight_range)
                         max_weight = np.max(weight_range)
-                        if (min_weight < -args.w8_threshold) or (max_weight > args.w8_threshold):
+                        if (min_weight < -args.w8_max_threshold) or (max_weight > args.w8_max_threshold):
                             qw_param['bit_width'] = 8
                             w8_nodes[_node.name] = {
                                 'op_type': _node.op_type,
-                                'range': (float(min_weight), float(max_weight)),
+                                'weight_range': (float(min_weight), float(max_weight)),
                                 'inputs': [i for i in _node.input],
                                 'outputs': [o for o in _node.output]
+                            }
+                    if qw_param['bit_width'] < 8 and args.w8_p99_threshold is not None:
+                        p99_weight = np.percentile(np.abs(weight.cpu().numpy()), 99.0)
+                        max_weight = np.max(np.abs(weight_range))
+                        if max_weight > p99_weight * args.w8_p99_threshold:
+                            qw_param['bit_width'] = 8
+                            w8_nodes[_node.name] = {
+                                'op_type': _node.op_type,
+                                'weight_range': (float(np.min(weight_range)), float(np.max(weight_range))),
+                                'inputs': [i for i in _node.input],
+                                'outputs': [o for o in _node.output],
+                                'p99_weight': float(p99_weight)
                             }
                     scale, q_min, q_max = get_quant_tensor(weight.shape, qw_param, weight_range)
                     rest = (weight / scale) - (weight / scale).floor()
@@ -202,10 +214,15 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                     if _node.op_type == 'Conv':
                         group = [attr for attr in _node.attribute if attr.name == 'group'][0]
                         if group.i != 1: qw_param['bit_width'] = 8
-                    if args.w8_threshold is not None:
+                    if qw_param['bit_width'] != 8 and args.w8_max_threshold is not None:
                         min_weight = np.min(weight_range)
                         max_weight = np.max(weight_range)
-                        if (min_weight < -args.w8_threshold) or (max_weight > args.w8_threshold):
+                        if (min_weight < -args.w8_max_threshold) or (max_weight > args.w8_max_threshold):
+                            qw_param['bit_width'] = 8
+                    if qw_param['bit_width'] != 8 and args.w8_p99_threshold is not None:
+                        p99_weight = np.percentile(np.abs(weight.cpu().numpy()), 99.0)
+                        max_weight = np.max(np.abs(weight_range))
+                        if max_weight > p99_weight * args.w8_p99_threshold:
                             qw_param['bit_width'] = 8
                     scale, q_min, q_max = get_quant_tensor(weight.shape, qw_param, weight_range)
                     new_rounded_weight = quant_weight(
@@ -223,7 +240,7 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
             graph_q.update_model()
     if dist.get_rank() == 0:
         graph_brecq.save_onnx_model('brecq')
-        if args.w8_threshold is not None:
+        if len(w8_nodes) > 0:
             with open(osp.join(args.output_dir, 'brecq_w8_nodes.json'), 'w') as f:
                 json.dump(w8_nodes, f, indent=4)
         if len(dw_convs) > 0:

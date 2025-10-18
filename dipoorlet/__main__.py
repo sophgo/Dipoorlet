@@ -55,7 +55,8 @@ parser.add_argument("--optim_transformer", help="Transformer model optimization"
 parser.add_argument("--model_type", help="Transformer model type", choices=["unet", "swin", "vit"], default=None)
 parser.add_argument("--quant_format", default="QDQ", type=str, choices=["QOP", "QDQ"])
 parser.add_argument("--extra_calib_table", type=str, default=None, help="Path to extra calibration table to update activation clip values.")
-parser.add_argument("--w8_threshold", type=float, default=None, help="Threshold for 8-bit weight quantization")
+parser.add_argument("--w8_max_threshold", type=float, default=None, help="Threshold for 8-bit weight quantization")
+parser.add_argument("--w8_p99_threshold", type=float, default=None, help="Threshold for 8-bit weight quantization")
 args = parser.parse_args()
 
 if args.slurm:

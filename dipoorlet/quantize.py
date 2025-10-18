@@ -1,7 +1,7 @@
 import copy
 
 import numpy as np
-from onnx import TensorProto, helper
+from onnx import TensorProto, helper, numpy_helper
 
 from .platform_settings import LAYER_HAS_WEIGHT, platform_setting_table
 from .utils import ONNXGraph, logger
@@ -76,16 +76,23 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
                 find_weight = True
                 if node.op_type == 'ConvTranspose' or node.op_type == 'MatMul':
                     need_transpose = True
-                if args.w8_threshold is not None:
-                    min_weight = np.min(data_range_list[in_tensor])
-                    max_weight = np.max(data_range_list[in_tensor])
-                    if (min_weight < -args.w8_threshold) or (max_weight > args.w8_threshold):
-                        param['qw_params']['bit_width'] = 8
                 if node.op_type == 'Conv':
                     group = [attr for attr in node.attribute if attr.name == 'group'][0]
                     if group.i != 1 and args.deploy == 'sophgo':
                         # sophgo does not support w4a8 depthwise conv
                         param['qw_params']['bit_width'] = 8
+                if param['qw_params']['bit_width'] != 8 and args.w8_max_threshold is not None:
+                    min_weight = np.min(data_range_list[in_tensor])
+                    max_weight = np.max(data_range_list[in_tensor])
+                    if (min_weight < -args.w8_max_threshold) or (max_weight > args.w8_max_threshold):
+                        param['qw_params']['bit_width'] = 8
+                if param['qw_params']['bit_width'] != 8 and args.w8_p99_threshold is not None:
+                    weight = numpy_helper.to_array(graph.initializer[in_tensor][0])
+                    max_value = np.max(np.abs(weight))
+                    p99_value = np.percentile(np.abs(weight), 99)
+                    if max_value > args.w8_p99_threshold * p99_value:
+                        param['qw_params']['bit_width'] = 8
+
                 q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
                                                     need_transpose)
 
