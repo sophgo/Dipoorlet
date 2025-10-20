@@ -92,6 +92,8 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
                     p99_value = np.percentile(np.abs(weight), 99)
                     if max_value > args.w8_p99_threshold * p99_value:
                         param['qw_params']['bit_width'] = 8
+                if node.name in args.w8_layers:
+                    param['qw_params']['bit_width'] = 8
 
                 q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
                                                     need_transpose)

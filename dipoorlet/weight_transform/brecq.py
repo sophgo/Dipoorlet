@@ -107,7 +107,13 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                                 'inputs': [i for i in _node.input],
                                 'outputs': [o for o in _node.output]
                             }
-
+                    if qw_param['bit_width'] < 8 and _node.name in args.w8_layers:
+                        qw_param['bit_width'] = 8
+                        w8_nodes[_node.name] = {
+                            'op_type': _node.op_type,
+                            'inputs': [i for i in _node.input],
+                            'outputs': [o for o in _node.output]
+                        }
                     if qw_param['bit_width'] < 8 and args.w8_max_threshold is not None:
                         min_weight = np.min(weight_range)
                         max_weight = np.max(weight_range)
@@ -214,6 +220,8 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                     if _node.op_type == 'Conv':
                         group = [attr for attr in _node.attribute if attr.name == 'group'][0]
                         if group.i != 1: qw_param['bit_width'] = 8
+                    if qw_param['bit_width'] != 8 and _node.name in args.w8_layers:
+                        qw_param['bit_width'] = 8
                     if qw_param['bit_width'] != 8 and args.w8_max_threshold is not None:
                         min_weight = np.min(weight_range)
                         max_weight = np.max(weight_range)
