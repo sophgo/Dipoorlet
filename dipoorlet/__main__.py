@@ -57,6 +57,7 @@ parser.add_argument("--quant_format", default="QDQ", type=str, choices=["QOP", "
 parser.add_argument("--extra_calib_table", type=str, default=None, help="Path to extra calibration table to update activation clip values.")
 parser.add_argument("--w8_max_threshold", type=float, default=None, help="Threshold for 8-bit weight quantization")
 parser.add_argument("--w8_p99_threshold", type=float, default=None, help="Threshold for 8-bit weight quantization")
+parser.add_argument("--w8_kurtosis_threshold", type=float, default=None, help="Threshold for 8-bit weight quantization")
 parser.add_argument("--w8_layers", type=str, nargs='+', default=[], help="Layers for 8-bit weight quantization")
 args = parser.parse_args()
 

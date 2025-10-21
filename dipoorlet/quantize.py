@@ -81,6 +81,8 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
                     if group.i != 1 and args.deploy == 'sophgo':
                         # sophgo does not support w4a8 depthwise conv
                         param['qw_params']['bit_width'] = 8
+                if param['qw_params']['bit_width'] != 8 and node.name in args.w8_layers:
+                    param['qw_params']['bit_width'] = 8
                 if param['qw_params']['bit_width'] != 8 and args.w8_max_threshold is not None:
                     min_weight = np.min(data_range_list[in_tensor])
                     max_weight = np.max(data_range_list[in_tensor])
@@ -92,8 +94,15 @@ def insert_fake_quant_node(graph, node, act_quantized, data_range_list, args):
                     p99_value = np.percentile(np.abs(weight), 99)
                     if max_value > args.w8_p99_threshold * p99_value:
                         param['qw_params']['bit_width'] = 8
-                if node.name in args.w8_layers:
-                    param['qw_params']['bit_width'] = 8
+                if param['qw_params']['bit_width'] != 8 and args.w8_kurtosis_threshold is not None:
+                    weight = numpy_helper.to_array(graph.initializer[in_tensor][0])
+                    weight_mean = np.mean(weight)
+                    weight_std = np.std(weight)
+                    if weight_std == 0:
+                        weight_std = 1e-5
+                    kurtosis = np.mean(((weight - weight_mean) / weight_std) ** 4)
+                    if kurtosis > args.w8_kurtosis_threshold:
+                        param['qw_params']['bit_width'] = 8
 
                 q_nodes, _, _ = get_qnode_by_param(param['qw_params'], in_tensor, shape, data_range_list[in_tensor],
                                                     need_transpose)

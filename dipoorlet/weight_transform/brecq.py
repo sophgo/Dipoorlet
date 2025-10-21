@@ -137,6 +137,20 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                                 'outputs': [o for o in _node.output],
                                 'p99_weight': float(p99_weight)
                             }
+                    if qw_param['bit_width'] < 8 and args.w8_kurtosis_threshold is not None:
+                        weight_mean = torch.mean(weight)
+                        weight_std = torch.std(weight)
+                        if weight_std == 0:
+                            weight_std = 1e-5
+                        kurtosis = torch.mean(((weight - weight_mean) / weight_std) ** 4).item()
+                        if kurtosis > args.w8_kurtosis_threshold:
+                            qw_param['bit_width'] = 8
+                            w8_nodes[_node.name] = {
+                                'op_type': _node.op_type,
+                                'kurtosis': float(kurtosis),
+                                'inputs': [i for i in _node.input],
+                                'outputs': [o for o in _node.output]
+                            }
                     scale, q_min, q_max = get_quant_tensor(weight.shape, qw_param, weight_range)
                     rest = (weight / scale) - (weight / scale).floor()
                     qw_tensor = {'scale': scale,
@@ -217,21 +231,8 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                     qw_param = platform_setting_table[args.deploy]['qw_params'].copy()
                     if _node.op_type == 'ConvTranspose' or _node.op_type == 'MatMul':
                         weight = weight.transpose(0, 1)
-                    if _node.op_type == 'Conv':
-                        group = [attr for attr in _node.attribute if attr.name == 'group'][0]
-                        if group.i != 1: qw_param['bit_width'] = 8
-                    if qw_param['bit_width'] != 8 and _node.name in args.w8_layers:
+                    if _node.name in dw_convs or _node.name in w8_nodes:
                         qw_param['bit_width'] = 8
-                    if qw_param['bit_width'] != 8 and args.w8_max_threshold is not None:
-                        min_weight = np.min(weight_range)
-                        max_weight = np.max(weight_range)
-                        if (min_weight < -args.w8_max_threshold) or (max_weight > args.w8_max_threshold):
-                            qw_param['bit_width'] = 8
-                    if qw_param['bit_width'] != 8 and args.w8_p99_threshold is not None:
-                        p99_weight = np.percentile(np.abs(weight.cpu().numpy()), 99.0)
-                        max_weight = np.max(np.abs(weight_range))
-                        if max_weight > p99_weight * args.w8_p99_threshold:
-                            qw_param['bit_width'] = 8
                     scale, q_min, q_max = get_quant_tensor(weight.shape, qw_param, weight_range)
                     new_rounded_weight = quant_weight(
                         weight,
