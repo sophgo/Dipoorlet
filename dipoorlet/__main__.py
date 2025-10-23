@@ -75,6 +75,10 @@ if args.output_dir is None:
     output_dir = os.path.join(os.path.abspath(model_path), 'results')
     args.output_dir = output_dir
 
+if len(args.w8_layers) == 1 and os.path.isfile(args.w8_layers[0]):
+    with open(args.w8_layers[0], 'r') as f:
+        args.w8_layers = [line.strip() for line in f.readlines()]
+
 if args.model_type is not None:
     args.optim_transformer = True
     args.skip_prof_layer = True
