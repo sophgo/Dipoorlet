@@ -35,7 +35,6 @@ def quant_graph(onnx_graph, clip_val, args):
             if len(input_producers) == 2:
                 if any([prod.op_type == "MatMul" for prod in input_producers if not isinstance(prod, str)]) and \
                    any([inp in graph_q.initializer for inp in node.input]):
-                    print(f"Skip Add node {node.name} for bias quant.")
                     continue
         if node.op_type in platform_setting_table[args.deploy]['quant_nodes']:
             quant_node_list.append(node)
