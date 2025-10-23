@@ -96,8 +96,8 @@ class ActivationCache(object):
         sub_net = sub_graph.model
         ort_inputs = {}
         ort_session = ort.InferenceSession(sub_net.SerializeToString(), providers=self.providers)
-        if 'CUDAExecutionProvider' not in ort_session.get_provider_options():
-            logger.warning("CUDA may not used. Please check your ort/cuda/cudnn version.")
+        # if 'CUDAExecutionProvider' not in ort_session.get_provider_options():
+        #     logger.warning("CUDA may not used. Please check your ort/cuda/cudnn version.")
 
         for data in input_generator:
             for name in sub_graph.network_inputs:
@@ -198,8 +198,8 @@ def forward_get_minmax(onnx_graph, args):
                 graph.output.insert(0, onnx.ValueInfoProto(name=output_name))
     providers = [("CUDAExecutionProvider", {'device_id': args.local_rank})]
     ort_session = ort.InferenceSession(net.SerializeToString(), providers=providers)
-    if 'CUDAExecutionProvider' not in ort_session.get_provider_options():
-        logger.warning("CUDA may not used. Please check your ort/cuda/cudnn version.")
+    # if 'CUDAExecutionProvider' not in ort_session.get_provider_options():
+    #     logger.warning("CUDA may not used. Please check your ort/cuda/cudnn version.")
     # Start activation quantization.
     statistics = {}
     t1 = 0
@@ -246,8 +246,8 @@ def forward_get_hist(onnx_graph, stats_min_max, args):
                 graph.output.insert(0, onnx.ValueInfoProto(name=output_name))
     providers = [("CUDAExecutionProvider", {'device_id': args.local_rank})]
     ort_session = ort.InferenceSession(net.SerializeToString(), providers=providers)
-    if 'CUDAExecutionProvider' not in ort_session.get_provider_options():
-        logger.warning("CUDA may not used. Please check your ort/cuda/cudnn version.")
+    # if 'CUDAExecutionProvider' not in ort_session.get_provider_options():
+    #     logger.warning("CUDA may not used. Please check your ort/cuda/cudnn version.")
     # Start activation quantization.
     statistics = {}
     ort_inputs = {}
@@ -291,8 +291,8 @@ def forward_net_octav(onnx_graph, args):
                 graph.output.insert(0, onnx.ValueInfoProto(name=output_name))
     providers = [("CUDAExecutionProvider", {'device_id': args.local_rank})]
     ort_session = ort.InferenceSession(net.SerializeToString(), providers=providers)
-    if 'CUDAExecutionProvider' not in ort_session.get_provider_options():
-        logger.warning("CUDA may not used. Please check your ort/cuda/cudnn version.")
+    # if 'CUDAExecutionProvider' not in ort_session.get_provider_options():
+    #     logger.warning("CUDA may not used. Please check your ort/cuda/cudnn version.")
     # Start activation quantization.
     statistics = {}
     t1 = 0
