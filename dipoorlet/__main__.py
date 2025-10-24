@@ -58,6 +58,7 @@ parser.add_argument("--extra_calib_table", type=str, default=None, help="Path to
 parser.add_argument("--w8_max_threshold", type=float, default=None, help="Threshold for 8-bit weight quantization")
 parser.add_argument("--w8_p99_threshold", type=float, default=None, help="Threshold for 8-bit weight quantization")
 parser.add_argument("--w8_kurtosis_threshold", type=float, default=None, help="Threshold for 8-bit weight quantization")
+parser.add_argument("--w8_kurtosis_topk", type=int, default=None, help="Topk kurtosis layers for 8-bit weight quantization")
 parser.add_argument("--w8_layers", type=str, nargs='+', default=[], help="Layers for 8-bit weight quantization")
 args = parser.parse_args()
 

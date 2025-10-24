@@ -39,6 +39,28 @@ def quant_graph(onnx_graph, clip_val, args):
         if node.op_type in platform_setting_table[args.deploy]['quant_nodes']:
             quant_node_list.append(node)
 
+    if args.w8_kurtosis_topk is not None:
+        # further filter quant_node_list by kurtosis
+        node_kurtosis = {}
+        for node in quant_node_list:
+            if node.name in args.w8_layers or node.name in args.skip_layers:
+                continue
+            if node.op_type in LAYER_HAS_WEIGHT and node.input[1] in graph_q.initializer:
+                weight = numpy_helper.to_array(graph_q.initializer[node.input[1]][0])
+                weight_mean = np.mean(weight)
+                weight_std = np.std(weight)
+                if weight_std == 0:
+                    weight_std = 1e-5
+                kurtosis = np.mean(((weight - weight_mean) / weight_std) ** 4)
+                node_kurtosis[node.name] = kurtosis
+        # get topk nodes by kurtosis
+        sorted_nodes = sorted(node_kurtosis.items(), key=lambda x: x[1], reverse=True)
+        topk_nodes = [name for name, _ in sorted_nodes[:args.w8_kurtosis_topk]]
+        args.w8_layers.extend([name for name in topk_nodes if name not in args.w8_layers])
+        logger.info(f"Top-{args.w8_kurtosis_topk} layers by kurtosis for w8 quantization:")
+        for name in topk_nodes:
+            logger.info(f"  {name}: kurtosis={node_kurtosis[name]:.4f}")
+
     act_quantized = []
     for node in quant_node_list:
         insert_fake_quant_node(graph_q, node, act_quantized, clip_val, args)
