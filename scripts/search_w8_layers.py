@@ -78,18 +78,20 @@ def parse_args():
     return args
 
 
-def get_last_learnable_ops(model: onnx.ModelProto) -> List[onnx.NodeProto]:
+def get_last_learnable_ops(model: onnx.ModelProto, args) -> List[onnx.NodeProto]:
     # 1. 获取图
     graph = model.graph
 
     # 2. 建立 value_name -> 消费它的节点列表 的映射
     value2consuming_ops = defaultdict(list)
     for op in graph.node:
+        if op.name in args.skip_layers:
+            continue
         for inp in op.input:
             value2consuming_ops[inp].append(op)
 
     # 3. 找出所有 Conv/Gemm/MatMul 节点
-    candidates: List[onnx.NodeProto] = [n for n in graph.node if n.op_type in LEARNABLE_LAYER_TYPES]
+    candidates: List[onnx.NodeProto] = [n for n in graph.node if n.op_type in LEARNABLE_LAYER_TYPES and n.name not in args.skip_layers]
 
     # 4. 从每个候选节点出发，BFS 看它后面是否还有同类算子
     def has_conv_gemm_matmul_downstream(start: onnx.NodeProto) -> bool:
@@ -130,11 +132,11 @@ def search_w8_layers(graph, clip_val, logger, args) -> List[str]:
     max_len = args.w8_layer_num
     beam_width = args.beam_width
     fp_act_cache = ActivationCache(graph, args)
-    last_learnable_ops = get_last_learnable_ops(graph.model)
+    last_learnable_ops = get_last_learnable_ops(graph.model, args)
     last_learnable_outputs = []
     for op in last_learnable_ops:
         last_learnable_outputs.extend(op.output)
-    fp_output_tensors = [np.stack(fp_act_cache[output]) for output in last_learnable_outputs]
+    fp_output_tensors = [np.concatenate(fp_act_cache[output]) for output in last_learnable_outputs]
     candidate_ops = []
     for op in graph.graph.node:
         if op.name in args.skip_layers:
@@ -147,14 +149,14 @@ def search_w8_layers(graph, clip_val, logger, args) -> List[str]:
                 if group != 1 and args.deploy == 'sophgo':
                     continue
             candidate_ops.append(op)
-    # 初始 beam
-    quantized_graph, _ = quant_graph(graph, clip_val, args)
-    q_act_cache = ActivationCache(quantized_graph, args)
-    q_output_tensors = [np.stack(q_act_cache[output]) for output in last_learnable_outputs]
-    beam = [BeamNode(args.w8_layers, l2loss(fp_output_tensors, q_output_tensors), max_len)]
     logger.info("Total candidate w8 layers: {}, beam width: {}, max search length: {}".format(
         len(candidate_ops), beam_width, max_len))
     logger.info("Output tensors to calculate loss: {}".format(last_learnable_outputs))
+    # 初始 beam
+    quantized_graph, _ = quant_graph(graph, clip_val, args)
+    q_act_cache = ActivationCache(quantized_graph, args)
+    q_output_tensors = [np.concatenate(q_act_cache[output]) for output in last_learnable_outputs]
+    beam = [BeamNode(args.w8_layers, l2loss(fp_output_tensors, q_output_tensors), max_len)]
     logger.info("Initial loss: {:.6f}".format(beam[0].loss))
     logger.info(f"Initial w8 layers: {args.w8_layers}")
     
@@ -173,7 +175,7 @@ def search_w8_layers(graph, clip_val, logger, args) -> List[str]:
                 args.w8_layers = new_seq
                 quantized_graph, _ = quant_graph(graph, clip_val, args)
                 q_act_cache = ActivationCache(quantized_graph, args)
-                q_output_tensors = [np.stack(q_act_cache[output]) for output in last_learnable_outputs]
+                q_output_tensors = [np.concatenate(q_act_cache[output]) for output in last_learnable_outputs]
                 new_loss = l2loss(fp_output_tensors, q_output_tensors)
                 logger.info("Test sequence: {}, loss: {:.6f}".format(new_seq, new_loss))
                 new_node = BeamNode(new_seq, new_loss, max_len)
