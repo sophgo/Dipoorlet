@@ -172,6 +172,8 @@ def brecq(graph_ori, graph, act_clip_val, weight_clip_val, args):
                 # get acti quantization param
                 following_node = following_nolinear(graph, _node, act_func_type)
                 acti_range = clip_val[following_node.output[0]]
+                if act_func_type == 'relu' and _node.name in w8_nodes:
+                    w8_nodes[_node.name]['following_relu_output'] = following_node.output[0]
                 if args.deploy != 'nnie':
                     acti_shape = graph.get_tensor_shape(following_node.output[0])
                     qi_param = platform_setting_table[args.deploy]['qi_params']
