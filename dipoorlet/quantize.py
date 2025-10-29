@@ -45,6 +45,9 @@ def quant_graph(onnx_graph, clip_val, args):
         for node in quant_node_list:
             if node.name in args.w8_layers or node.name in args.skip_layers:
                 continue
+            if node.op_type == 'Conv':
+                group = [attr for attr in node.attribute if attr.name == 'group'][0]
+                if group.i != 1 and args.deploy == 'sophgo': continue
             if node.op_type in LAYER_HAS_WEIGHT and node.input[1] in graph_q.initializer:
                 weight = numpy_helper.to_array(graph_q.initializer[node.input[1]][0])
                 weight_mean = np.mean(weight)
